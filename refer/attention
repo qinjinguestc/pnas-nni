@@ -1,0 +1,48 @@
+def channel_attention(input_feature, ratio=4):
+    channel_axis = 1 if K.image_data_format() == "channels_first" else -1
+    channel = input_feature.shape[channel_axis]
+    inchannel = int(channel)
+    shared_layer_one = Dense(inchannel // ratio,
+                             activation='relu',
+                             kernel_initializer='he_normal',
+                             use_bias=True,
+                             bias_initializer='zeros')
+    shared_layer_two = Dense(inchannel,
+                             kernel_initializer='he_normal',
+                             use_bias=True,
+                             bias_initializer='zeros')
+
+    avg_pool = GlobalAveragePooling2D()(input_feature)
+    avg_pool = Reshape((1, 1, inchannel))(avg_pool)
+    assert avg_pool.shape[1:] == (1, 1, inchannel)
+    avg_pool = shared_layer_one(avg_pool)
+    assert avg_pool.shape[1:] == (1, 1, inchannel // ratio)
+    avg_pool = shared_layer_two(avg_pool)
+    assert avg_pool.shape[1:] == (1, 1, inchannel)
+
+    max_pool = GlobalMaxPooling2D()(input_feature)
+    max_pool = Reshape((1, 1, inchannel))(max_pool)
+    assert max_pool.shape[1:] == (1, 1, inchannel)
+    max_pool = shared_layer_one(max_pool)
+    assert max_pool.shape[1:] == (1, 1, inchannel // ratio)
+    max_pool = shared_layer_two(max_pool)
+    assert max_pool.shape[1:] == (1, 1, inchannel)
+
+    cbam_feature = Add()([avg_pool, max_pool])
+    cbam_feature = Activation('sigmoid')(cbam_feature)
+
+    if K.image_data_format() == "channels_first":
+        cbam_feature = Permute((3, 1, 2))(cbam_feature)
+
+    return multiply([input_feature, cbam_feature])
+
+    def attach_attention_module(net):
+    net = channel_attention(net, ratio=4)
+    return net
+
+    att1 = attach_attention_module(self.midresult[0])
+        x = tf.concat([att1, x], axis=-1,
+                      name='up_concat_' + str(2))
+
+
+
