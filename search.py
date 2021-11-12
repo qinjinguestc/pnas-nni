@@ -10,20 +10,21 @@ import torch
 import torch.nn as nn
 
 import datasets
-from model import Unet
+from model import CNN, Unet
 from nni.nas.pytorch.callbacks import ArchitectureCheckpoint, LRSchedulerCallback
-from utils import accuracy
+from utils import accuracy, evaluation_index
 
 
 logger = logging.getLogger('nni')
 
 if __name__ == "__main__":
     parser = ArgumentParser("darts")
-    parser.add_argument("--layers", default=2, type=int)
-    parser.add_argument("--batch-size", default=16, type=int)
-    parser.add_argument("--log-frequency", default=10, type=int)
-    parser.add_argument("--epochs", default=1, type=int)
+    parser.add_argument("--layers", default=3, type=int)
+    parser.add_argument("--batch-size", default=1, type=int)
+    parser.add_argument("--log-frequency", default=100, type=int)
+    parser.add_argument("--epochs", default=50, type=int)
     parser.add_argument("--channels", default=16, type=int)
+    parser.add_argument("--workers", default=0)
     parser.add_argument("--unrolled", default=False, action="store_true")
     parser.add_argument("--visualization", default=False, action="store_true")
     parser.add_argument("--v1", default=False, action="store_true")
@@ -32,7 +33,9 @@ if __name__ == "__main__":
     # dataset_train, dataset_valid = datasets.get_dataset("cifar10")
     dataset_train, dataset_valid = datasets.get_dataset("brats2015", cutout_length=0)
 
-    model = Unet(in_channels=4, n_classes=5, n_layers=3, n_nodes=4)
+    # model = CNN(32, 3, args.channels, 10, args.layers)
+    # model = Unet(in_channels=3, n_classes=10, n_layers=2, n_nodes=4)  # Unet for Cifar
+    model = Unet(in_channels=4, n_classes=5, n_layers=3, n_nodes=4) # Unet for Brats
     criterion = nn.CrossEntropyLoss()
 
     optim = torch.optim.SGD(model.parameters(), 0.025, momentum=0.9, weight_decay=3.0E-4)
@@ -42,12 +45,14 @@ if __name__ == "__main__":
         from nni.algorithms.nas.pytorch.darts import DartsTrainer
         trainer = DartsTrainer(model,
                                loss=criterion,
-                               metrics=lambda output, target: accuracy(output, target, topk=(1,)),
+                               # metrics=lambda output, target: accuracy(output, target, topk=(1,)),
+                               metrics=lambda output, target: accuracy(output, target),
                                optimizer=optim,
                                num_epochs=args.epochs,
                                dataset_train=dataset_train,
                                dataset_valid=dataset_valid,
                                batch_size=args.batch_size,
+                               workers=0,
                                log_frequency=args.log_frequency,
                                unrolled=args.unrolled,
                                callbacks=[LRSchedulerCallback(lr_scheduler), ArchitectureCheckpoint("./checkpoints")])
@@ -60,11 +65,13 @@ if __name__ == "__main__":
         trainer = DartsTrainer(
             model=model,
             loss=criterion,
-            metrics=lambda output, target: accuracy(output, target),
+            # metrics=lambda output, target: accuracy(output, target, topk=(1,)),
+            metrics=lambda output, target: evaluation_index(output, target),
             optimizer=optim,
             num_epochs=args.epochs,
             dataset=dataset_train,
             batch_size=args.batch_size,
+            workers=args.workers,
             log_frequency=args.log_frequency,
             unrolled=args.unrolled
         )

@@ -11,10 +11,9 @@ from torch.utils.tensorboard import SummaryWriter
 
 import datasets
 import utils
-from model import Unet
-import losses
-from nni.nas.pytorch.fixed import apply_fixed_architecture
+from model import CNN, Unet
 from nni.nas.pytorch.utils import AverageMeter
+from nni.retiarii import fixed_arch
 
 logger = logging.getLogger('nni')
 
@@ -24,6 +23,8 @@ writer = SummaryWriter()
 
 
 def train(config, train_loader, model, optimizer, criterion, epoch):
+    # top1 = AverageMeter("top1")
+    # top5 = AverageMeter("top5")
     losses = AverageMeter("losses")
     dice = AverageMeter("dice")
     mIoU = AverageMeter("mIoU")
@@ -41,38 +42,56 @@ def train(config, train_loader, model, optimizer, criterion, epoch):
         x, y = x.to(device, non_blocking=True), y.to(device, non_blocking=True)
         bs = x.size(0)
         y = torch.squeeze(y).long()
+
         optimizer.zero_grad()
+        # logits, aux_logits = model(x)
         logits = model(x)
         loss = criterion(logits, y)
+        # if config.aux_weight > 0.:
+        #     loss += config.aux_weight * criterion(aux_logits, y)
         loss.backward()
         # gradient clipping
         nn.utils.clip_grad_norm_(model.parameters(), config.grad_clip)
         optimizer.step()
 
+        # accuracy = utils.accuracy(logits, y, topk=(1, 5))
         accuracy = utils.accuracy(logits, y)
         mIoU.update(utils.mIoU(logits, y, config.nclasses).item(), 1)
         dice.update(utils.dice_coefficient(logits, y).item(), 1)
         losses.update(loss.item(), bs)
+        # top1.update(accuracy["acc1"], bs)
+        # top5.update(accuracy["acc5"], bs)
 
         writer.add_scalar("loss/train", loss.item(), global_step=cur_step)
+        # writer.add_scalar("acc1/train", accuracy["acc1"], global_step=cur_step)
+        # writer.add_scalar("acc5/train", accuracy["acc5"], global_step=cur_step)
         writer.add_scalar("acc/train", accuracy, global_step=cur_step)
         writer.add_scalar("mIoU/train", mIoU.avg, global_step=cur_step)
         writer.add_scalar("dice/train", dice.avg, global_step=cur_step)
 
         if step % config.log_frequency == 0 or step == len(train_loader) - 1:
+            # logger.info(
+            #     "Train: [{:3d}/{}] Step {:03d}/{:03d} Loss {losses.avg:.3f} "
+            #     "Prec@(1,5) ({top1.avg:.1%}, {top5.avg:.1%})".format(
+            #         epoch + 1, config.epochs, step, len(train_loader) - 1, losses=losses,
+            #         top1=top1, top5=top5))
+
             logger.info(
                 "Train: [{:3d}/{}] Step {:03d}/{:03d} Loss {losses.avg:.3f} "
                 "Acc {acc:.4%} mIOU {miou.avg:.4%} dice {dice.avg:.4%}".format(
-                    epoch+1, config.epochs, step, len(train_loader)-1, losses=losses,
+                    epoch + 1, config.epochs, step, len(train_loader) - 1, losses=losses,
                     acc=accuracy, miou=mIoU, dice=dice))
 
         cur_step += 1
 
+    # logger.info("Train: [{:3d}/{}] Final Prec@1 {:.4%}".format(epoch + 1, config.epochs, top1.avg))
     logger.info("Train: [{:3d}/{}] Final acc={:.4%} mIoU={:.4%} dice={:.4%}".format(epoch + 1, config.epochs, accuracy,
                                                                                     mIoU.avg, dice.avg))
 
 
 def validate(config, valid_loader, model, criterion, epoch, cur_step):
+    # top1 = AverageMeter("top1")
+    # top5 = AverageMeter("top5")
     losses = AverageMeter("losses")
     dice = AverageMeter("dice")
     mIoU = AverageMeter("mIoU")
@@ -86,15 +105,24 @@ def validate(config, valid_loader, model, criterion, epoch, cur_step):
             X, y = X.to(device, non_blocking=True), y.to(device, non_blocking=True)
             bs = X.size(0)
             y = torch.squeeze(y).long()
+
             logits = model(X)
             loss = criterion(logits, y)
 
+            # accuracy = utils.accuracy(logits, y, topk=(1, 5))
             accuracy = utils.accuracy(logits, y)
             mIoU.update(utils.mIoU(logits, y, config.nclasses).item(), 1)
             dice.update(utils.dice_coefficient(logits, y).item(), 1)
             losses.update(loss.item(), bs)
+            # top1.update(accuracy["acc1"], bs)
+            # top5.update(accuracy["acc5"], bs)
 
             if step % config.log_frequency == 0 or step == len(valid_loader) - 1:
+                # logger.info(
+                #     "Valid: [{:3d}/{}] Step {:03d}/{:03d} Loss {losses.avg:.3f} "
+                #     "Prec@(1,5) ({top1.avg:.1%}, {top5.avg:.1%})".format(
+                #         epoch + 1, config.epochs, step, len(valid_loader) - 1, losses=losses,
+                #         top1=top1, top5=top5))
                 logger.info(
                     "Valid: [{:3d}/{}] Step {:03d}/{:03d} Loss {losses.avg:.3f} "
                     "Acc ({acc:.4%}) mIoU {mIoU.avg:.4%} dice {dice.avg:.4%}".format(
@@ -102,35 +130,40 @@ def validate(config, valid_loader, model, criterion, epoch, cur_step):
                         acc=accuracy, mIoU=mIoU, dice=dice))
 
     writer.add_scalar("loss/test", losses.avg, global_step=cur_step)
+    # writer.add_scalar("acc1/test", top1.avg, global_step=cur_step)
+    # writer.add_scalar("acc5/test", top5.avg, global_step=cur_step)
     writer.add_scalar("acc/test", accuracy, global_step=cur_step)
     writer.add_scalar("mIoU/test", mIoU.avg, global_step=cur_step)
     writer.add_scalar("dice/test", dice.avg, global_step=cur_step)
+
+    # logger.info("Valid: [{:3d}/{}] Final Prec@1 {:.4%}".format(epoch + 1, config.epochs, top1.avg))
     logger.info("Valid: [{:3d}/{}] Final acc={:.4%} mIoU={:.4%} dice ={:.4%}".format(epoch + 1, config.epochs, accuracy
                                                                                      , mIoU.avg, dice.avg))
 
+    # return top1.avg
     return accuracy, mIoU.avg, dice.avg
-
 
 if __name__ == "__main__":
     parser = ArgumentParser("darts")
     parser.add_argument("--layers", default=20, type=int)
-    parser.add_argument("--nclasses", default=5, type=int)
     parser.add_argument("--batch-size", default=16, type=int)
-    parser.add_argument("--log-frequency", default=500, type=int)
-    parser.add_argument("--epochs", default=50, type=int)
-    parser.add_argument("--aux-weight", default=0, type=float)
+    parser.add_argument("--log-frequency", default=10, type=int)
+    parser.add_argument("--epochs", default=60, type=int)
+    parser.add_argument("--aux-weight", default=0.4, type=float)
     parser.add_argument("--drop-path-prob", default=0.2, type=float)
-    parser.add_argument("--workers", default=4)
+    parser.add_argument("--workers", default=0)
     parser.add_argument("--grad-clip", default=5., type=float)
-    parser.add_argument("--arc-checkpoint", default="./final architecture/checkpoint.json")
+    parser.add_argument("--arc-checkpoint", default="./final architecture/20210812-165458checkpoint.json")
 
     args = parser.parse_args()
+    # dataset_train, dataset_valid = datasets.get_dataset("cifar10", cutout_length=16)
     dataset_train, dataset_valid = datasets.get_dataset("brats2015", cutout_length=0)
 
-    model = Unet(in_channels=4, n_classes=5, n_layers=3, n_nodes=4)
-    apply_fixed_architecture(model, args.arc_checkpoint)
+    with fixed_arch(args.arc_checkpoint):
+        # model = CNN(32, 3, 36, 10, args.layers, auxiliary=True)
+        model = Unet(in_channels=4, n_classes=5, n_layers=3, n_nodes=4)
     criterion = nn.CrossEntropyLoss()
-    # criterion = losses.DistBinaryDiceLoss()
+
     model.to(device)
     criterion.to(device)
 
@@ -148,7 +181,8 @@ if __name__ == "__main__":
                                                num_workers=args.workers,
                                                pin_memory=True)
 
-    best_acc, best_mIoU, best_dice = 0, 0, 0
+    # best_top1 = 0.
+    best_acc, best_mIoU, best_dice = 0., 0., 0.
     for epoch in range(args.epochs):
         # drop_prob = args.drop_path_prob * epoch / args.epochs
         # model.drop_path_prob(drop_prob)
@@ -158,6 +192,8 @@ if __name__ == "__main__":
 
         # validation
         cur_step = (epoch + 1) * len(train_loader)
+        # top1 = validate(args, valid_loader, model, criterion, epoch, cur_step)
+        # best_top1 = max(best_top1, top1)
         accuracy, mIoU, dice = validate(args, valid_loader, model, criterion, epoch, cur_step)
         best_acc = max(best_acc, accuracy)
         best_mIoU = max(best_mIoU, mIoU)
@@ -165,5 +201,6 @@ if __name__ == "__main__":
 
         lr_scheduler.step()
 
+    # logger.info("Final best Prec@1 = {:.4%}".format(best_top1))
     logger.info("Final best acc = {:.4%} mIoU = {:.4%} dice={:.4%}".format(best_acc, best_mIoU, best_dice))
     torch.save(model, './final model/checkpoint_{}.json'.format(time.strftime('%Y%m%d-%H%M%S')))

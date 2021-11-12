@@ -11,30 +11,31 @@ import SimpleITK as sitk
 import imageio
 import time
 
-# def accuracy(output, target, topk=(attention,)):
+# def accuracy(output, target, topk=(1,)):
 #     """ Computes the precision@k for the specified values of k """
 #     maxk = max(topk)
 #     batch_size = target.size(0)
 #
-#     _, pred = output.topk(maxk, attention, True, True)
+#     _, pred = output.topk(maxk, 1, True, True)
 #     pred = pred.t()
 #     # one-hot case
-#     if target.ndimension() > attention:
-#         target = target.max(attention)[attention]
+#     if target.ndimension() > 1:
+#         target = target.max(1)[1]
 #
-#     correct = pred.eq(target.view(attention, -attention).expand_as(pred))
+#     correct = pred.eq(target.view(1, -1).expand_as(pred))
 #
 #     res = dict()
 #     for k in topk:
-#         correct_k = correct[:k].contiguous().view(-attention).float().sum(0)
-#         res["acc{}".format(k)] = correct_k.mul_(attention.0 / batch_size).item()
+#         correct_k = correct[:k].reshape(-1).float().sum(0)
+#         res["acc{}".format(k)] = correct_k.mul_(1.0 / batch_size).item()
 #     return res
 
-
-def accuracy(preds, label):
+def accuracy(preds, label, topk=(1,)):
     correct, labeled = batch_pix_accuracy(
         preds, label)
     pixAcc = 1.0 * correct / (np.spacing(1) + labeled)
+    # res = dict()
+    # res['acc'] = pixAcc
     return pixAcc
 
 
@@ -165,5 +166,12 @@ def saveItk(results, path, savepath):
     if not os.path.exists(savepath):
         os.makedirs(savepath)
     sitk.WriteImage(sitk.Cast(img, sitk.sitkInt8), os.path.join(savepath, name), True)
+
+def evaluation_index(pred, label, nclass=5, topk=(1,)):
+    res = dict()
+    res['acc'] = accuracy(pred, label, topk)
+    res['mIOU'] = mIoU(pred, label, nclass)
+    res['dice'] = dice_coefficient(pred, label)
+    return res
 
 

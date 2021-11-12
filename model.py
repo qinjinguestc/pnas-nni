@@ -7,7 +7,8 @@ import torch
 import torch.nn as nn
 
 import ops
-from nni.nas.pytorch import mutables
+from nni.retiarii.nn.pytorch import LayerChoice, InputChoice
+
 
 class AuxiliaryHead(nn.Module):
     """ Auxiliary head in 2/3 place of network to let the gradient flow well """
@@ -44,7 +45,7 @@ class Node(nn.Module):
             stride = 2 if i < num_downsample_connect else 1
             choice_keys.append("{}_p{}".format(node_id, i))
             self.ops.append(
-                mutables.LayerChoice(OrderedDict([
+                LayerChoice(OrderedDict([
                     ("maxpool", ops.PoolBN('max', channels, 3, stride, 1, affine=False)),
                     ("avgpool", ops.PoolBN('avg', channels, 3, stride, 1, affine=False)),
                     ("skipconnect", nn.Identity() if stride == 1 else ops.FactorizedReduce(channels, channels, affine=False)),
@@ -52,9 +53,9 @@ class Node(nn.Module):
                     ("sepconv5x5", ops.SepConv(channels, channels, 5, stride, 2, affine=False)),
                     ("dilconv3x3", ops.DilConv(channels, channels, 3, stride, 2, 2, affine=False)),
                     ("dilconv5x5", ops.DilConv(channels, channels, 5, stride, 4, 2, affine=False))
-                ]), key=choice_keys[-1]))
+                ]), label=choice_keys[-1]))
         self.drop_path = ops.DropPath()
-        self.input_switch = mutables.InputChoice(choose_from=choice_keys, n_chosen=2, key="{}_switch".format(node_id))
+        self.input_switch = InputChoice(n_candidates=len(choice_keys), n_chosen=2, label="{}_switch".format(node_id))
 
     def forward(self, prev_nodes):
         assert len(self.ops) == len(prev_nodes)
@@ -95,6 +96,18 @@ class Cell(nn.Module):
         return output
 
 
+class UpCell(nn.Module):
+
+    def __init__(self, n_nodes, channels_pp, channels_p, channels_c, reduction_p, reduction):
+        super().__init__()
+        self.upcell = Cell(n_nodes, channels_pp, channels_p, channels_c, reduction_p, reduction)
+        self.upsample = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+
+    def forward(self, s0, s1):
+        cell_out = self.upcell(s0, s1)
+        return self.upsample(cell_out)
+
+
 class CNN(nn.Module):
 
     def __init__(self, input_size, in_channels, channels, n_classes, n_layers, n_nodes=4,
@@ -120,7 +133,7 @@ class CNN(nn.Module):
         reduction_p, reduction = False, False
         for i in range(n_layers):
             reduction_p, reduction = reduction, False
-            # Reduce featuremap size and double channels in attention/3 and 2/3 layer.
+            # Reduce featuremap size and double channels in 1/3 and 2/3 layer.
             if i in [n_layers // 3, 2 * n_layers // 3]:
                 c_cur *= 2
                 reduction = True
@@ -160,6 +173,7 @@ class CNN(nn.Module):
 
 
 class Unet(nn.Module):
+
     def __init__(self, in_channels, n_classes, n_layers, n_nodes=4,
                  stem_multiplier=1, mid_channel=16):
         super().__init__()
@@ -210,9 +224,6 @@ class Unet(nn.Module):
         self.gap = nn.AdaptiveAvgPool2d(1)
         self.linear = nn.Linear(mid_channel, n_classes)
 
-
-
-
     def forward(self, x):
         x0 = self.inc(x)
         x1 = self.down1(x0)
@@ -243,13 +254,3 @@ class Unet(nn.Module):
         return out
 
 
-class UpCell(nn.Module):
-
-    def __init__(self, n_nodes, channels_pp, channels_p, channels_c, reduction_p, reduction):
-        super().__init__()
-        self.upcell = Cell(n_nodes, channels_pp, channels_p, channels_c, reduction_p, reduction)
-        self.upsample = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
-
-    def forward(self, s0, s1):
-        cell_out = self.upcell(s0, s1)
-        return self.upsample(cell_out)

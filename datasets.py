@@ -1,7 +1,6 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT license.
 
-
 import os
 import random
 from glob import glob
@@ -9,16 +8,18 @@ import re
 import time
 
 import numpy as np
-import SimpleITK as sitk
 import torch
 import torch.utils.data as data
-from PIL import Image
 from torchvision import transforms
 from torchvision.datasets import CIFAR10
 from torchvision.transforms import (CenterCrop, Compose, Normalize, Resize,
                                     Scale, ToTensor)
+import SimpleITK as sitk
+from PIL import Image
+
 
 mha_result = './mha result/{}/'.format(time.strftime('%Y%m%d-%H%M%S'))
+
 
 class Cutout(object):
     def __init__(self, length):
@@ -43,43 +44,55 @@ class Cutout(object):
         return img
 
 
-def get_dataset(cls, cutout_length=0, test = None):
-
+def get_dataset(cls, cutout_length=0, test=None):
     if cls == "cifar10":
         MEAN = [0.49139968, 0.48215827, 0.44653124]
         STD = [0.24703233, 0.24348505, 0.26158768]
+
+        transf = [
+            transforms.RandomCrop(32, padding=4),
+            transforms.RandomHorizontalFlip()
+        ]
+        normalize = [
+            transforms.ToTensor(),
+            transforms.Normalize(MEAN, STD)
+        ]
+        cutout = []
+        if cutout_length > 0:
+            cutout.append(Cutout(cutout_length))
+
+        train_transform = transforms.Compose(transf + normalize + cutout)
+        valid_transform = transforms.Compose(normalize)
+
+        dataset_train = CIFAR10(root="D:/Code/data", train=True, download=True, transform=train_transform)
+        dataset_valid = CIFAR10(root="D:/Code/data", train=False, download=True, transform=valid_transform)
+
     elif cls == 'brats2015':
         MEAN = [0.2007713, 0.28985304, 0.31852704, 0.36998123]
         STD = [0.59269184, 0.9364896, 1.0523965, 1.1754125]
 
-    transf = [
-        # transforms.RandomCrop(32, padding=4),
-        transforms.RandomHorizontalFlip()
-    ]
-    normalize = [
-        transforms.ToTensor(),
-        transforms.Normalize(MEAN, STD)
-    ]
-    cutout = []
-    if cutout_length > 0:
-        cutout.append(Cutout(cutout_length))
+        transf = [
+            transforms.RandomHorizontalFlip()
+        ]
+        normalize = [
+            transforms.ToTensor(),
+            transforms.Normalize(MEAN, STD)
+        ]
+        cutout = []
+        if cutout_length > 0:
+            cutout.append(Cutout(cutout_length))
 
-    train_transform = transforms.Compose(transf + normalize + cutout)
-    valid_transform = transforms.Compose(normalize)
+        train_transform = transforms.Compose(transf + normalize + cutout)
+        valid_transform = transforms.Compose(normalize)
 
-    if cls == "cifar10":
-        dataset_train = CIFAR10(root="./data", train=True, download=True, transform=train_transform)
-        dataset_valid = CIFAR10(root="./data", train=False, download=True, transform=valid_transform)
-
-    elif cls == 'brats2015':
         # datapath = '/home/soap/code/data'
         datapath = 'D:/Code/data'
         dataset_train = BraTS2015(root=datapath + '/BRATS2015_slice_all', mode='train', transform=train_transform)
         dataset_valid = BraTS2015(root=datapath + '/BRATS2015_slice_all', mode='val', transform=valid_transform)
         dataset_test = BraTS2015(root=datapath + '/BRATS2015_slice_all', mode='test', transform=valid_transform)
+
     else:
         raise NotImplementedError
-
     if test is True:
         return dataset_test
     else:
@@ -159,6 +172,7 @@ class BraTS2015(data.Dataset):
                 image = Image.fromarray(image_array.astype(np.uint8))
                 image = self.transform(image)
                 label = ToTensor()(label)
+                label = label.long().squeeze()
                 return image, label
             elif self.mode == 'test':
                 image = Image.fromarray(image_array.astype(np.uint8))
@@ -166,14 +180,11 @@ class BraTS2015(data.Dataset):
                 label = ToTensor()(label)
                 return image, label
 
-
     def __len__(self):
         return len(self.Flair_path)
 
     def saveItk(self, array):
-
         array = np.asarray(array)
-
         if self.saveArr is not None:
             self.saveArr = np.concatenate([self.saveArr, array], axis=0)
         else:
@@ -246,6 +257,3 @@ class BraTS2015(data.Dataset):
             image = sitk.GetArrayFromImage(mha)
             # image = np.expand_dims(image, -attention)
             return np.asarray(image, dtype=dtype)
-
-
-
