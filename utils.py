@@ -169,8 +169,8 @@ def saveItk(results, path, savepath):
 
 def evaluation_index(pred, label, nclass=5, topk=(1,)):
     res = dict()
-    res['acc'] = accuracy(pred, label, topk)
-    res['mIOU'] = mIoU(pred, label, nclass)
+    # res['acc'] = accuracy(pred, label, topk)
+    # res['mIOU'] = mIoU(pred, label, nclass)
     res['dice'] = dice_coefficient(pred, label)
     return res
 

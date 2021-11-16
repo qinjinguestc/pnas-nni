@@ -184,7 +184,7 @@ class Unet(nn.Module):
         self.inc = ops.DoubleConv(in_channels, 2 * mid_channel)
         self.down1 = ops.Down(2 * mid_channel, 4 * mid_channel)
         # self.down2 = ops.Down(2 * mid_channel, 4 * mid_channel)
-        self.up1 = ops.Up(4 * mid_channel, 2 * mid_channel, n_classes)
+        self.up1 = ops.Up(n_nodes * mid_channel, 2 * mid_channel, n_classes)
         # self.up2 = ops.Up(2 * mid_channel, mid_channel)
         self.outc = ops.OutConv(2 * mid_channel, n_classes)
 
